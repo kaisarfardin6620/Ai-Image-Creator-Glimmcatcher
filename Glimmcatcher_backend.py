@@ -34,6 +34,11 @@ IMAGE_INTENT_KEYWORDS = [
     "make an image", "show me a picture", "picture of", "scene of", "photo of", "image of"
 ]
 
+# Additional keywords for non-visual/informational detection
+NON_VISUAL_KEYWORDS = [
+    "history", "explain", "describe", "what is", "who is", "when was", "how does", "list", "overview", "introduction", "background", "definition", "information about", "facts about"
+]
+
 # Caches
 prompt_cache = {}
 response_cache = {}
@@ -48,6 +53,17 @@ def is_image_intent(text: str) -> bool:
     """Checks if input likely implies an image generation request."""
     lowered = text.lower()
     return any(keyword in lowered for keyword in IMAGE_INTENT_KEYWORDS)
+
+def is_non_visual_response(text: str) -> bool:
+    """Detects if the response is likely informational/non-visual, not an image prompt."""
+    lowered = text.lower()
+    # Heuristic: If it contains non-visual keywords or is a long paragraph/list, treat as chat
+    if any(kw in lowered for kw in NON_VISUAL_KEYWORDS):
+        return True
+    # If it looks like a Wikipedia article or has multiple numbered sections, treat as chat
+    if len(text) > 300 and (text.count("\n") > 3 or text.count("**") > 2):
+        return True
+    return False
 
 @retry(stop=stop_after_attempt(3), wait=wait_random_exponential(min=1, max=5))
 def _stream_chat_response(conversation, model="gpt-4-turbo", temperature=0.7, max_tokens=800):
@@ -134,7 +150,7 @@ def get_image_assistant_response(user_input: str, user_id: str = None) -> dict:
             return {"status": "error", "message": "Failed to generate refined description."}
 
         # Advanced image intent detection
-        if not is_image_intent(question) and not is_image_intent(refined_description):
+        if not is_image_intent(question) and (not is_image_intent(refined_description) or is_non_visual_response(refined_description)):
             logger.info("Input interpreted as general chat.")
             return {"status": "chat", "message": refined_description}
 
