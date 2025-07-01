@@ -38,6 +38,10 @@ IMAGE_INTENT_KEYWORDS = [
 NON_VISUAL_KEYWORDS = [
     "history", "explain", "describe", "what is", "who is", "when was", "how does", "list", "overview", "introduction", "background", "definition", "information about", "facts about"
 ]
+# Visual scene-setting keywords
+VISUAL_SCENE_KEYWORDS = [
+    "imagine", "picture", "visualize", "scene", "painting", "photo", "photograph", "rendering", "drawing", "depict", "show", "illustration", "artwork", "portrait", "landscape", "sketch"
+]
 
 # Caches
 prompt_cache = {}
@@ -56,12 +60,21 @@ def is_image_intent(text: str) -> bool:
 
 def is_non_visual_response(text: str) -> bool:
     """Detects if the response is likely informational/non-visual, not an image prompt."""
-    lowered = text.lower()
-    # Heuristic: If it contains non-visual keywords or is a long paragraph/list, treat as chat
-    if any(kw in lowered for kw in NON_VISUAL_KEYWORDS):
+    lowered = text.lower().strip()
+    # If it contains visual scene-setting keywords, always treat as image intent
+    if any(kw in lowered for kw in VISUAL_SCENE_KEYWORDS):
+        return False
+    # If it starts with 'the history of', 'overview', etc., treat as chat
+    if lowered.startswith("the history of") or lowered.startswith("overview") or lowered.startswith("introduction"):
         return True
-    # If it looks like a Wikipedia article or has multiple numbered sections, treat as chat
-    if len(text) > 300 and (text.count("\n") > 3 or text.count("**") > 2):
+    # If it contains non-visual keywords and is long, treat as chat
+    if any(kw in lowered for kw in NON_VISUAL_KEYWORDS) and len(text) > 200:
+        return True
+    # If it looks like a Wikipedia article or has multiple numbered/bulleted sections, treat as chat
+    if (text.count("\n") > 5 or text.count("**") > 3 or text.count("- ") > 3 or text.count("1.") > 1) and len(text) > 300:
+        return True
+    # If it contains many years/dates, treat as chat
+    if len(re.findall(r"\b(1[5-9][0-9]{2}|20[0-2][0-9]|202[0-5])\b", text)) > 2:
         return True
     return False
 
@@ -183,3 +196,13 @@ def get_image_assistant_response(user_input: str, user_id: str = None) -> dict:
     except Exception as e:
         logger.error(f"Error in image assistant response: {e}")
         return {"status": "error", "message": f"Failed to generate image: {str(e)}"}
+
+def was_last_turn_image(user_id):
+    """Returns True if the last assistant message for this user was a visual description (i.e., image generation)."""
+    history = conversation_history.get(user_id, [])
+    if len(history) >= 2:
+        last_assistant = history[-1]
+        if last_assistant["role"] == "assistant":
+            # Heuristic: If the last assistant message is not informational, treat as image
+            return not is_non_visual_response(last_assistant["content"])
+    return False
